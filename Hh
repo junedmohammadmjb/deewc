@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# Variables
+SYSLOG_DIR="/etc/rsyslog.d"
+XSIAM_FILE="$SYSLOG_DIR/xsiam-syslog.conf"
+LOCAL5_FILE="$SYSLOG_DIR/local5-syslog.conf"
+CRONTAB_ENTRY="03 23 * * * /usr/sbin/service rsyslog restart"
+PAX_COLLECTOR="@@paxcollector04.keybank.com:13001"
+SELINUX_PORT="13001"
+
+# Ensure script is run as root
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root" 
+   exit 1
+fi
+
+# Go to syslog directory
+cd $SYSLOG_DIR || exit
+
+# Create xsiam-syslog.conf file
+echo "Creating $XSIAM_FILE..."
+cat > "$XSIAM_FILE" <<EOL
+auth.info; local5.info; authpriv.info $PAX_COLLECTOR
+EOL
+
+# Create local5-syslog.conf file
+echo "Creating $LOCAL5_FILE..."
+cat > "$LOCAL5_FILE" <<EOL
+local5.info /var/log/messages
+EOL
+
+# Add crontab entry
+echo "Updating crontab..."
+(crontab -l 2>/dev/null; echo "$CRONTAB_ENTRY") | crontab -
+
+# Restart rsyslog service
+echo "Restarting rsyslog service..."
+service rsyslog restart
+
+# Check rsyslog status
+echo "Checking rsyslog service status..."
+service rsyslog status
+
+# Set SELinux policy
+echo "Configuring SELinux ports..."
+getenforce
+semanage port -l | grep syslog
+semanage port -a -t syslogd_port_t -p tcp $SELINUX_PORT
+semanage port -l | grep syslog
+
+# Test logger
+echo "Testing syslog logger..."
+logger -p local5.info "syslog test from $(hostname)"
+grep 'syslog test from' /var/log/messages | tail
+
